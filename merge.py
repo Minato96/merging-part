@@ -28,6 +28,11 @@ FLUSH_EVERY = 2000  # RAM-safe
 
 # ---------- helpers ----------
 
+def count_rows(csv_path: Path) -> int:
+    with open(csv_path, "r", encoding="utf-8", errors="ignore") as f:
+        return sum(1 for _ in f) - 1  # minus header
+
+
 def extract_snapshot_day(url: str):
     if not isinstance(url, str):
         return None
@@ -95,13 +100,13 @@ def process_csv(
                 "tags": r.get("tags"),
                 "pricing_text": r.get("tag_price"),
                 "release_text": r.get("use_case_created_date"),
-                "saves": None,
-                "comments": None,
-                "rating": None,
+                "saves": r.get("saves"),
+                "comments": r.get("comments_count"),
+                "rating": r.get("rating"),
             })
 
             # ---------- LISTINGS JSON ----------
-            tools = safe_json_load(r.get("listings_json"))
+            tools = safe_json_load(r.get("tools_json"))
             for t in tools:
                 buffer.append({
                     "tool_name": t.get("name"),
@@ -111,11 +116,11 @@ def process_csv(
                     "internal_link": t.get("internal_link"),
                     "external_link": t.get("external_link"),
                     "tags": t.get("tags"),
-                    "pricing_text": t.get("pricing_text"),
+                    "pricing_text": t.get("pricing"),
                     "release_text": t.get("release_date"),
                     "saves": t.get("saves"),
                     "comments": t.get("comments"),
-                    "rating": t.get("rating"),
+                    "rating": t.get("average_rating"),
                 })
 
             if len(buffer) >= FLUSH_EVERY:
@@ -131,7 +136,7 @@ if __name__ == "__main__":
     MASTER = Path("ai_wayback_panel_tool_day.csv")
 
     process_csv(
-        csv_path=Path("ai_wayback_async_out_2023.csv"),
+        csv_path=Path("ai_wayback_async_out_2024_2.csv"),
         master_path=MASTER,
     )
 
