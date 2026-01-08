@@ -91,14 +91,14 @@ def process_csv(
 
             # ---------- PRIMARY TOOL ----------
             buffer.append({
-                "tool_name": r.get("use_case_name"),
+                "tool_name": r.get("name"),
                 "snapshot_day": snapshot_day,
                 "date": date_iso,
                 "raw_classes": r.get("use_case_category"),
                 "internal_link": r.get("link"),
                 "external_link": r.get("tool_link"),
                 "tags": r.get("tags"),
-                "pricing_text": r.get("tag_price"),
+                "pricing_text": r.get("pricing_model"),
                 "release_text": r.get("use_case_created_date"),
                 "saves": r.get("saves"),
                 "comments": r.get("comments_count"),
