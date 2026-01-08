@@ -11,16 +11,24 @@ WAYBACK_RE = re.compile(r"/web/(\d{14})/")
 
 FINAL_COLUMNS = [
     "tool_name",
-    "views",
-    "saves",
-    "rating",
-    "price_text",
+    "snapshot_day",
     "date",
+    "raw_classes",
+    "internal_link",
+    "external_link",
+    "tags",
+    "pricing_text",
+    "release_text",
+    "saves",
+    "comments",
+    "rating",
 ]
 
-FLUSH_EVERY = 1000  # rows
+FLUSH_EVERY = 2000  # RAM-safe
 
-def extract_snapshot_date(url: str):
+# ---------- helpers ----------
+
+def extract_snapshot_day(url: str):
     if not isinstance(url, str):
         return None
     m = WAYBACK_RE.search(url)
@@ -28,8 +36,15 @@ def extract_snapshot_date(url: str):
         return None
     return m.group(1)[:8]  # YYYYMMDD
 
+
+def iso_date(day: Optional[str]):
+    if not day:
+        return None
+    return f"{day[:4]}-{day[4:6]}-{day[6:]}"
+
+
 def safe_json_load(x):
-    if pd.isna(x) or x == "" or x == "[]":
+    if pd.isna(x) or x in ("", "[]"):
         return []
     try:
         return json.loads(x)
@@ -37,95 +52,87 @@ def safe_json_load(x):
         return []
 
 
-def combine_price(price_label: Optional[str], pricing_text: Optional[str]) -> Optional[str]:
-    parts = []
-    if price_label:
-        parts.append(str(price_label).strip())
-    if pricing_text:
-        parts.append(str(pricing_text).strip())
-    return " + ".join(parts) if parts else None
-
-
-def append_chunk(master_path: Path, chunk: list):
-    if not chunk:
+def append_chunk(master_path: Path, rows: list):
+    if not rows:
         return
 
-    new_df = pd.DataFrame(chunk, columns=FINAL_COLUMNS)
+    df = pd.DataFrame(rows, columns=FINAL_COLUMNS)
 
-    if master_path.exists() and master_path.stat().st_size > 0:
-        master = pd.read_csv(master_path, encoding='latin1')
-        master = pd.concat([master, new_df], ignore_index=True)
-    else:
-        master = new_df
+    write_header = not master_path.exists() or master_path.stat().st_size == 0
 
-    # full-row dedup + sort
-    master = master.drop_duplicates()
-    master = master.sort_values(by="tool_name", kind="stable")
+    df.to_csv(
+        master_path,
+        mode="a",
+        header=write_header,
+        index=False,
+        encoding="utf-8",
+        errors="replace",
+    )
 
-    master.to_csv(master_path, index=False)
 
+# ---------- main processor ----------
 
 def process_csv(
     csv_path: Path,
-    primary_tool_col: str,
-    link_col: str,
-    json_cols: List[str],
     master_path: Path,
 ):
-    df = pd.read_csv(csv_path)
     buffer = []
 
-    for _, r in tqdm(df.iterrows(), total=len(df), desc=csv_path.name):
-        date = extract_snapshot_date(r.get(link_col))
+    for chunk in pd.read_csv(csv_path, chunksize=500):
+        for _, r in chunk.iterrows():
 
-        # ---------- PRIMARY TOOL ----------
-        buffer.append({
-            "tool_name": r.get(primary_tool_col),
-            "views": r.get("views"),
-            "saves": r.get("saves"),
-            "rating": r.get("rating"),
-            "price_text": r.get("tag_price"),
-            "date": date,
-        })
+            snapshot_day = extract_snapshot_day(r.get("link"))
+            date_iso = iso_date(snapshot_day)
 
-        # ---------- JSON TOOLS ----------
-        for jc in json_cols:
-            if jc not in df.columns:
-                continue
+            # ---------- PRIMARY TOOL ----------
+            buffer.append({
+                "tool_name": r.get("use_case_name"),
+                "snapshot_day": snapshot_day,
+                "date": date_iso,
+                "raw_classes": r.get("use_case_category"),
+                "internal_link": r.get("link"),
+                "external_link": r.get("tool_link"),
+                "tags": r.get("tags"),
+                "pricing_text": r.get("tag_price"),
+                "release_text": r.get("use_case_created_date"),
+                "saves": None,
+                "comments": None,
+                "rating": None,
+            })
 
-            tools = safe_json_load(r.get(jc))
+            # ---------- LISTINGS JSON ----------
+            tools = safe_json_load(r.get("listings_json"))
             for t in tools:
                 buffer.append({
                     "tool_name": t.get("name"),
-                    "views": None,
+                    "snapshot_day": snapshot_day,
+                    "date": date_iso,
+                    "raw_classes": t.get("task_name"),
+                    "internal_link": t.get("internal_link"),
+                    "external_link": t.get("external_link"),
+                    "tags": t.get("tags"),
+                    "pricing_text": t.get("pricing_text"),
+                    "release_text": t.get("release_date"),
                     "saves": t.get("saves"),
+                    "comments": t.get("comments"),
                     "rating": t.get("rating"),
-                    "price_text": combine_price(
-                        t.get("price_label"),
-                        t.get("pricing_text"),
-                    ),
-                    "date": date,
                 })
 
-        # ---------- FLUSH ----------
-        if len(buffer) >= FLUSH_EVERY:
-            append_chunk(master_path, buffer)
-            buffer.clear()
+            if len(buffer) >= FLUSH_EVERY:
+                append_chunk(master_path, buffer)
+                buffer.clear()
 
-    # final flush
     append_chunk(master_path, buffer)
 
 
-# ----------------- USAGE -----------------
+# ---------- run ----------
+
 if __name__ == "__main__":
-    MASTER = Path("2025_featured_extracted_ai_data_sorted.csv")
+    MASTER = Path("ai_wayback_panel_tool_day.csv")
 
     process_csv(
         csv_path=Path("ai_wayback_async_out_2023.csv"),
-        primary_tool_col="use_case_category",
-        link_col="link",
-        json_cols=["listings_json"],
         master_path=MASTER,
     )
 
-    print(f"Merge complete → {MASTER}")
+    print(f"✅ Merge complete → {MASTER}")
