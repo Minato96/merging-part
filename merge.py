@@ -5,6 +5,9 @@ import json
 from pathlib import Path
 from typing import List, Optional
 from tqdm import tqdm
+import re
+
+WAYBACK_RE = re.compile(r"/web/(\d{14})/")
 
 FINAL_COLUMNS = [
     "tool_name",
@@ -17,6 +20,13 @@ FINAL_COLUMNS = [
 
 FLUSH_EVERY = 1000  # rows
 
+def extract_snapshot_date(url: str):
+    if not isinstance(url, str):
+        return None
+    m = WAYBACK_RE.search(url)
+    if not m:
+        return None
+    return m.group(1)[:8]  # YYYYMMDD
 
 def safe_json_load(x):
     if pd.isna(x) or x == "" or x == "[]":
@@ -58,7 +68,7 @@ def append_chunk(master_path: Path, chunk: list):
 def process_csv(
     csv_path: Path,
     primary_tool_col: str,
-    date_col: str,
+    link_col: str,
     json_cols: List[str],
     master_path: Path,
 ):
@@ -66,7 +76,7 @@ def process_csv(
     buffer = []
 
     for _, r in tqdm(df.iterrows(), total=len(df), desc=csv_path.name):
-        date = r.get(date_col)
+        date = extract_snapshot_date(r.get(link_col))
 
         # ---------- PRIMARY TOOL ----------
         buffer.append({
@@ -74,7 +84,7 @@ def process_csv(
             "views": r.get("views"),
             "saves": r.get("saves"),
             "rating": r.get("rating"),
-            "price_text": r.get("price_text"),
+            "price_text": r.get("tag_price"),
             "date": date,
         })
 
@@ -113,7 +123,7 @@ if __name__ == "__main__":
     process_csv(
         csv_path=Path("ai_wayback_async_out_2023.csv"),
         primary_tool_col="use_case_category",
-        date_col="use_case_created_date",
+        link_col="link",
         json_cols=["listings_json"],
         master_path=MASTER,
     )
