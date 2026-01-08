@@ -53,7 +53,7 @@ def append_chunk(master_path: Path, chunk: list):
     new_df = pd.DataFrame(chunk, columns=FINAL_COLUMNS)
 
     if master_path.exists() and master_path.stat().st_size > 0:
-        master = pd.read_csv(master_path)
+        master = pd.read_csv(master_path, encoding='latin1')
         master = pd.concat([master, new_df], ignore_index=True)
     else:
         master = new_df
