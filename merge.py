@@ -4,6 +4,7 @@ import pandas as pd
 import json
 from pathlib import Path
 from typing import List, Optional
+from tqdm import tqdm
 
 FINAL_COLUMNS = [
     "tool_name",
@@ -13,6 +14,8 @@ FINAL_COLUMNS = [
     "price_text",
     "date",
 ]
+
+FLUSH_EVERY = 1000  # rows
 
 
 def safe_json_load(x):
@@ -33,21 +36,40 @@ def combine_price(price_label: Optional[str], pricing_text: Optional[str]) -> Op
     return " + ".join(parts) if parts else None
 
 
+def append_chunk(master_path: Path, chunk: list):
+    if not chunk:
+        return
+
+    new_df = pd.DataFrame(chunk, columns=FINAL_COLUMNS)
+
+    if master_path.exists() and master_path.stat().st_size > 0:
+        master = pd.read_csv(master_path)
+        master = pd.concat([master, new_df], ignore_index=True)
+    else:
+        master = new_df
+
+    # full-row dedup + sort
+    master = master.drop_duplicates()
+    master = master.sort_values(by="tool_name", kind="stable")
+
+    master.to_csv(master_path, index=False)
+
+
 def process_csv(
     csv_path: Path,
     primary_tool_col: str,
     date_col: str,
     json_cols: List[str],
-) -> pd.DataFrame:
+    master_path: Path,
+):
     df = pd.read_csv(csv_path)
+    buffer = []
 
-    rows = []
-
-    for _, r in df.iterrows():
+    for _, r in tqdm(df.iterrows(), total=len(df), desc=csv_path.name):
         date = r.get(date_col)
 
         # ---------- PRIMARY TOOL ----------
-        rows.append({
+        buffer.append({
             "tool_name": r.get(primary_tool_col),
             "views": r.get("views"),
             "saves": r.get("saves"),
@@ -63,44 +85,37 @@ def process_csv(
 
             tools = safe_json_load(r.get(jc))
             for t in tools:
-                price_text = combine_price(
-                    t.get("price_label"),
-                    t.get("pricing_text"),
-                )
-
-                rows.append({
+                buffer.append({
                     "tool_name": t.get("name"),
                     "views": None,
                     "saves": t.get("saves"),
                     "rating": t.get("rating"),
-                    "price_text": price_text,
+                    "price_text": combine_price(
+                        t.get("price_label"),
+                        t.get("pricing_text"),
+                    ),
                     "date": date,
                 })
 
-    out = pd.DataFrame(rows, columns=FINAL_COLUMNS)
-    return out
+        # ---------- FLUSH ----------
+        if len(buffer) >= FLUSH_EVERY:
+            append_chunk(master_path, buffer)
+            buffer.clear()
+
+    # final flush
+    append_chunk(master_path, buffer)
 
 
-def append_to_master(master_path: Path, new_df: pd.DataFrame):
-    if master_path.exists():
-        master = pd.read_csv(master_path)
-        master = pd.concat([master, new_df], ignore_index=True)
-    else:
-        master = new_df
-
-    master.to_csv(master_path, index=False)
-
-
-# ----------------- USAGE EXAMPLE -----------------
+# ----------------- USAGE -----------------
 if __name__ == "__main__":
-    MASTER = Path("merged_tools.csv")
+    MASTER = Path("2025_featured_extracted_ai_data_sorted.csv")
 
-    df_out = process_csv(
-        csv_path=Path("input.csv"),
-        primary_tool_col="use_case_category",   # example: H2O AI
+    process_csv(
+        csv_path=Path("ai_wayback_async_out_2023.csv"),
+        primary_tool_col="use_case_category",
         date_col="use_case_created_date",
-        json_cols=["listings_json", "also_searched_json"],
+        json_cols=["listings_json"],
+        master_path=MASTER,
     )
 
-    append_to_master(MASTER, df_out)
-    print(f"Merged data appended to {MASTER}")
+    print(f"Merge complete → {MASTER}")
