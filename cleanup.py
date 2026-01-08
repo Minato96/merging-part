@@ -3,8 +3,8 @@
 import pandas as pd
 from pathlib import Path
 
-INPUT = Path("ai_wayback_panel_tool_day.csv")
-OUTPUT = Path("ai_wayback_panel_tool_day.csv")
+INPUT = Path("ai_wayback_panel_tool_day.final.csv")
+OUTPUT = Path("ai_wayback_panel_tool_day.final.csv")
 
 def main():
     print("🔹 Reading file...")
