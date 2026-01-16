@@ -29,6 +29,26 @@ FINAL_COLUMNS = [
 # ----------------------------
 # Helpers
 # ----------------------------
+WAYBACK_TS_RE = re.compile(r"/web/(\d{14})/")
+
+def extract_snapshot_from_url(*urls):
+    for url in urls:
+        if not isinstance(url, str):
+            continue
+        m = WAYBACK_TS_RE.search(url)
+        if m:
+            ts = m.group(1)
+            snapshot_day = ts[:8]
+            date = pd.to_datetime(snapshot_day, format="%Y%m%d").date().isoformat()
+            return snapshot_day, date
+    return None, None
+
+def extract_comments_count(row):
+    for key in ("comments_count", "number_of_comments"):
+        val = row.get(key)
+        if pd.notna(val):
+            return val
+    return None
 
 def normalize_url(url):
     if not isinstance(url, str) or not url.strip():
@@ -132,8 +152,12 @@ def process_csv(path: Path, source: str) -> list[dict]:
     out = []
 
     for _, r in tqdm(df.iterrows(), total=len(df), desc=path.name):
-        snapshot_day = r.get("snapshot_day")
-        date = r.get("date")
+        snapshot_day, date = extract_snapshot_from_url(
+                r.get("link"),
+                r.get("internal_link"),
+                r.get("tool_link"),
+                r.get("external_link"),
+            )
 
         # Main tool row
         row = build_row(
@@ -143,7 +167,7 @@ def process_csv(path: Path, source: str) -> list[dict]:
             pricing_text=r.get("pricing_model") or r.get("price_text") or r.get("pricing_text"),
             views=r.get("views"),
             saves=r.get("saves"),
-            comments_count=r.get("comments_count") or r.get("number_of_comments"),
+            comments_count=extract_comments_count(r),
             rating=r.get("rating"),
             versions=r.get("versions"),
             snapshot_day=snapshot_day,
@@ -205,7 +229,7 @@ def build_panel(csv_inputs: dict[str, str], output_path: Path):
 
 if __name__ == "__main__":
     CSV_INPUTS = {
-        "tools_2025.csv": "2025",
+        "ai_wayback_async_out_2025.csv": "2025",
     }
 
     build_panel(CSV_INPUTS, Path("final_panel_data.csv"))
