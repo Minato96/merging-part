@@ -29,6 +29,18 @@ FINAL_COLUMNS = [
 # ----------------------------
 # Helpers
 # ----------------------------
+WAYBACK_FULL_RE = re.compile(r"https?://web\.archive\.org/web/\d{14}/(https?://.+)")
+
+def unwrap_wayback(url: str) -> str | None:
+    if not isinstance(url, str) or not url.strip():
+        return None
+
+    m = WAYBACK_FULL_RE.match(url)
+    if m:
+        return m.group(1)
+
+    return url
+
 WAYBACK_TS_RE = re.compile(r"/web/(\d{14})/")
 
 def extract_snapshot_from_url(*urls):
@@ -51,17 +63,28 @@ def extract_comments_count(row):
     return None
 
 def normalize_url(url):
+    url = unwrap_wayback(url)
     if not isinstance(url, str) or not url.strip():
         return None
-    url = WAYBACK_RE.sub("/", url)
+
     p = urlparse(url)
     return urlunparse(
-        (p.scheme, p.netloc, p.path.rstrip("/"), "", "", "")
-    ).lower()
-
+        (
+            p.scheme.lower(),
+            p.netloc.lower(),
+            p.path.rstrip("/"),
+            "",
+            "",
+            "",
+        )
+    )
 
 def compute_tool_id(internal_link, external_link):
-    return normalize_url(internal_link) or normalize_url(external_link)
+    internal = normalize_url(internal_link)
+    if internal and "theresanaiforthat.com/ai/" in internal:
+        return internal
+
+    return normalize_url(external_link)
 
 
 def safe_int(v):
