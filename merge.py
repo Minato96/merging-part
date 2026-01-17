@@ -225,25 +225,80 @@ def process_csv_2024(path: Path, source: str) -> list[dict]:
 
     return out
 
-def append_2024_to_panel(panel_path: Path, csv_2024: Path):
+def append_2024_to_panel_streaming(
+    panel_path: Path,
+    csv_2024: Path,
+    chunksize: int = 200
+):
+    # Load existing panel ONCE
     panel = pd.read_csv(panel_path)
 
-    rows_2024 = process_csv_2024(csv_2024, source="2024")
-    df_2024 = pd.DataFrame(rows_2024)
+    header_written = False
 
-    combined = pd.concat([panel, df_2024], ignore_index=True)
+    for chunk in pd.read_csv(csv_2024, chunksize=chunksize):
+        out = []
 
-    combined = (
-        combined.sort_values(
-            by=["views", "saves", "rating"],
-            ascending=False,
-            na_position="last",
+        for _, r in chunk.iterrows():
+            snapshot_day, date = extract_snapshot_from_url(
+                r.get("link"),
+                r.get("tool_link"),
+            )
+
+            # Main row
+            main_row = build_row(
+                tool_name=r.get("name"),
+                internal_link=r.get("link"),
+                external_link=r.get("tool_link"),
+                pricing_text=r.get("pricing_model"),
+                views=None,
+                saves=r.get("saves"),
+                comments_count=extract_comments_count(r),
+                rating=r.get("rating"),
+                versions=r.get("versions"),
+                snapshot_day=snapshot_day,
+                date=date,
+                source="2024",
+            )
+            if main_row:
+                out.append(main_row)
+
+            # tools_json explosion
+            for item in parse_json(r.get("tools_json")):
+                tool_row = build_row(
+                    tool_name=item.get("name"),
+                    internal_link=item.get("tool_link"),
+                    external_link=item.get("external_link"),
+                    pricing_text=item.get("pricing"),
+                    views=None,
+                    saves=item.get("saves"),
+                    comments_count=None,
+                    rating=item.get("average_rating"),
+                    versions=None,
+                    snapshot_day=snapshot_day,
+                    date=date,
+                    source="2024",
+                )
+                if tool_row:
+                    out.append(tool_row)
+
+        if not out:
+            continue
+
+        df_chunk = pd.DataFrame(out)
+
+        # Merge + dedupe WITH PANEL
+        panel = (
+            pd.concat([panel, df_chunk], ignore_index=True)
+            .sort_values(by=["views", "saves", "rating"], ascending=False, na_position="last")
+            .drop_duplicates(subset=["tool_id", "snapshot_day"], keep="first")
         )
-        .drop_duplicates(subset=["tool_id", "snapshot_day"], keep="first")
-    )
 
-    combined = combined[FINAL_COLUMNS]
-    combined.to_csv(panel_path, index=False)
+        # 💾 Persist every chunk (important!)
+        panel = panel[FINAL_COLUMNS]
+        panel.to_csv(panel_path, index=False)
+
+        # 💨 free memory
+        del out, df_chunk
 
 def process_csv(path: Path, source: str) -> list[dict]:
     df = pd.read_csv(path)
@@ -326,8 +381,9 @@ def build_panel(csv_inputs: dict[str, str], output_path: Path):
 
 
 if __name__ == "__main__":
-    CSV_INPUTS = {
-        "ai_wayback_async_out_2025.csv": "2025",
-    }
-
-    build_panel(CSV_INPUTS, Path("final_panel_data.csv"))
+    append_2024_to_panel_streaming(
+        panel_path=Path("final_panel_data.csv"),
+        csv_2024=Path("ai_wayback_async_out_2024_2.csv"),
+        chunksize=100,   # tune this
+    )
+    print("2024 data appended to final_panel_data.csv")
