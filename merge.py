@@ -224,6 +224,34 @@ def process_csv_2024(path: Path, source: str) -> list[dict]:
                 out.append(tool_row)
 
     return out
+def process_csv_2023(path: Path, source: str) -> list[dict]:
+    out = []
+
+    for chunk in pd.read_csv(path, chunksize=200):
+        for _, r in chunk.iterrows():
+            snapshot_day, date = extract_snapshot_from_url(r.get("link"))
+
+            for item in parse_json(r.get("listings_json")):
+                row = build_row(
+                    tool_name=item.get("name"),
+                    internal_link=item.get("internal_link"),
+                    external_link=item.get("external_link"),
+                    pricing_text=item.get("price_label") or item.get("pricing_text"),
+                    views=None,                    # NOT AVAILABLE
+                    saves=item.get("saves"),
+                    comments_count=None,
+                    rating=item.get("rating"),
+                    versions=None,
+                    snapshot_day=snapshot_day,
+                    date=date,
+                    source=source,
+                )
+
+                if row:
+                    out.append(row)
+
+        yield out
+        out = []
 
 def append_2024_to_panel_streaming(
     panel_path: Path,
@@ -299,6 +327,26 @@ def append_2024_to_panel_streaming(
 
         # 💨 free memory
         del out, df_chunk
+
+def append_2023_to_panel(panel_path: Path, csv_2023: Path):
+    panel = pd.read_csv(panel_path)
+
+    for rows in process_csv_2023(csv_2023, source="2023"):
+        if not rows:
+            continue
+
+        df_2023 = pd.DataFrame(rows)
+
+        panel = (
+            pd.concat([panel, df_2023], ignore_index=True)
+            .sort_values(by=["views", "saves", "rating"], ascending=False, na_position="last")
+            .drop_duplicates(subset=["tool_id", "snapshot_day"], keep="first")
+        )
+
+        panel = panel[FINAL_COLUMNS]
+        panel.to_csv(panel_path, index=False)
+
+        del df_2023
 
 def process_csv(path: Path, source: str) -> list[dict]:
     df = pd.read_csv(path)
@@ -381,9 +429,8 @@ def build_panel(csv_inputs: dict[str, str], output_path: Path):
 
 
 if __name__ == "__main__":
-    append_2024_to_panel_streaming(
+    append_2023_to_panel(
         panel_path=Path("final_panel_data.csv"),
-        csv_2024=Path("ai_wayback_async_out_2024_2.csv"),
-        chunksize=100,   # tune this
+        csv_2023=Path("ai_wayback_async_out_2023.csv"),
     )
-    print("2024 data appended to final_panel_data.csv")
+    print("2023 data appended to final_panel_data.csv")
