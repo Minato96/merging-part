@@ -89,12 +89,16 @@ def compute_tool_id(internal_link, external_link):
 
 
 def safe_int(v):
-    try:
-        if pd.isna(v):
-            return None
-        return int(str(v).replace(",", "").strip())
-    except Exception:
+    if pd.isna(v):
         return None
+    try:
+        return int(v)
+    except Exception:
+        try:
+            return int(float(v))
+        except Exception:
+            return None
+
 
 
 def safe_float(v):
@@ -170,6 +174,76 @@ def build_row(
 # ----------------------------
 # Main processor
 # ----------------------------
+def process_csv_2024(path: Path, source: str) -> list[dict]:
+    df = pd.read_csv(path)
+    out = []
+
+    for _, r in tqdm(df.iterrows(), total=len(df), desc=path.name):
+        snapshot_day, date = extract_snapshot_from_url(
+            r.get("link"),
+            r.get("tool_link"),
+        )
+
+        # 1️⃣ Main tool row (the page itself)
+        main_row = build_row(
+            tool_name=r.get("name"),
+            internal_link=r.get("link"),
+            external_link=r.get("tool_link"),
+            pricing_text=r.get("pricing_model"),
+            views=None,                     # NOT AVAILABLE IN 2024
+            saves=r.get("saves"),
+            comments_count=extract_comments_count(r),
+            rating=r.get("rating"),
+            versions=r.get("versions"),
+            snapshot_day=snapshot_day,
+            date=date,
+            source=source,
+        )
+
+        if main_row:
+            out.append(main_row)
+
+        # 2️⃣ Expand tools_json
+        for item in parse_json(r.get("tools_json")):
+            tool_row = build_row(
+                tool_name=item.get("name"),
+                internal_link=item.get("tool_link"),
+                external_link=item.get("external_link"),
+                pricing_text=item.get("pricing"),
+                views=None,                  # NOT AVAILABLE
+                saves=item.get("saves"),
+                comments_count=None,
+                rating=item.get("average_rating"),
+                versions=None,
+                snapshot_day=snapshot_day,
+                date=date,
+                source=source,
+            )
+
+            if tool_row:
+                out.append(tool_row)
+
+    return out
+
+def append_2024_to_panel(panel_path: Path, csv_2024: Path):
+    panel = pd.read_csv(panel_path)
+
+    rows_2024 = process_csv_2024(csv_2024, source="2024")
+    df_2024 = pd.DataFrame(rows_2024)
+
+    combined = pd.concat([panel, df_2024], ignore_index=True)
+
+    combined = (
+        combined.sort_values(
+            by=["views", "saves", "rating"],
+            ascending=False,
+            na_position="last",
+        )
+        .drop_duplicates(subset=["tool_id", "snapshot_day"], keep="first")
+    )
+
+    combined = combined[FINAL_COLUMNS]
+    combined.to_csv(panel_path, index=False)
 
 def process_csv(path: Path, source: str) -> list[dict]:
     df = pd.read_csv(path)
